@@ -1,0 +1,55 @@
+[
+  {
+    "date": "2025-06-27T08:23:39.123Z",
+    "iceUsed": 20,
+    "hotUsed": 8,
+    "plannedIce": 50,
+    "plannedHot": 50
+  },
+  {
+    "date": "2025-06-27T08:24:27.592Z",
+    "iceUsed": 20,
+    "hotUsed": 8,
+    "plannedIce": 50,
+    "plannedHot": 50
+  },
+  {
+    "date": "2025-06-27T08:51:56.206Z",
+    "iceUsed": 20,
+    "hotUsed": 8,
+    "plannedIce": 50,
+    "plannedHot": 50
+  },
+  {
+    "date": "2025-06-30T06:23:04.284Z",
+    "iceUsed": 20,
+    "hotUsed": 8,
+    "plannedIce": 25,
+    "plannedHot": 25
+  },
+  {
+    "date": "2025-06-30T06:53:53.869Z",
+    "iceUsed": 20,
+    "hotUsed": 8,
+    "plannedIce": 30,
+    "plannedHot": 30
+  },
+   {
+    "date": "2025-06-30",
+    "iceUsed": 25,
+    "hotUsed": 15,
+    "plannedIce": 60,
+    "plannedHot": 60,
+    "remainingIce": 35,
+    "remainingHot": 45
+  },
+  {
+    "date": "2025-07-01",
+    "iceUsed": 20,
+    "hotUsed": 10,
+    "plannedIce": 50,
+    "plannedHot": 50,
+    "remainingIce": 30,
+    "remainingHot": 40
+  }
+]

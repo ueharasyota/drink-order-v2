@@ -1,0 +1,170 @@
+[
+  {
+    "date": "6月27日",
+    "inStock": 100,
+    "outStock": 0,
+    "cupType": "アイス"
+  },
+  {
+    "date": "6月27日",
+    "inStock": 100,
+    "outStock": 0,
+    "cupType": "アイス"
+  },
+  {
+    "date": "6月27日",
+    "inStock": 100,
+    "outStock": 0,
+    "cupType": "アイス"
+  },
+  {
+    "date": "6月27日",
+    "inStock": 100,
+    "outStock": 0,
+    "cupType": "ホット"
+  },
+  {
+    "date": "6月27日",
+    "inStock": 300,
+    "outStock": 0,
+    "cupType": "ホット"
+  },
+  {
+    "date": "6月27日",
+    "inStock": -200,
+    "outStock": 0,
+    "cupType": "ホット"
+  },
+  {
+    "date": "6月27日",
+    "inStock": -50,
+    "outStock": 0,
+    "cupType": "アイス"
+  },
+  {
+    "date": "6月27日",
+    "inStock": 0,
+    "outStock": 25,
+    "cupType": "アイス"
+  },
+  {
+    "date": "6月27日",
+    "inStock": 0,
+    "outStock": 30,
+    "cupType": "ホット"
+  },
+  {
+    "date": "6月27日",
+    "inStock": 200,
+    "outStock": 0,
+    "cupType": "アイス"
+  },
+  {
+    "date": "6月27日",
+    "inStock": 0,
+    "outStock": 50,
+    "cupType": "アイス"
+  },
+  {
+    "date": "6月30日",
+    "inStock": 0,
+    "outStock": 30,
+    "cupType": "アイス"
+  },
+  {
+    "date": "6月30日",
+    "inStock": 0,
+    "outStock": 30,
+    "cupType": "ホット"
+  },
+  {
+    "date": "6月30日",
+    "inStock": 0,
+    "outStock": 100,
+    "cupType": "アイス"
+  },
+  {
+    "date": "6月30日",
+    "inStock": 100,
+    "outStock": 0,
+    "cupType": "ホット"
+  },
+  {
+    "date": "7月2日",
+    "inStock": 100,
+    "outStock": 0,
+    "cupType": "アイス"
+  },
+  {
+    "date": "2025-07-02",
+    "inStock": 0,
+    "outStock": 30,
+    "cupType": "ホット"
+  },
+  {
+    "date": "2025-07-02",
+    "inStock": 0,
+    "outStock": 30,
+    "cupType": "アイス"
+  },
+  {
+    "date": "7月3日",
+    "inStock": 0,
+    "outStock": 50,
+    "cupType": "アイス"
+  },
+  {
+    "date": "7月3日",
+    "inStock": 0,
+    "outStock": 50,
+    "cupType": "ホット"
+  },
+  {
+    "date": "7月7日",
+    "inStock": 0,
+    "outStock": 30,
+    "cupType": "アイス"
+  },
+  {
+    "date": "7月7日",
+    "inStock": 0,
+    "outStock": 30,
+    "cupType": "ホット"
+  },
+  {
+    "date": "7月9日",
+    "inStock": 0,
+    "outStock": 30,
+    "cupType": "アイス"
+  },
+  {
+    "date": "7月9日",
+    "inStock": 0,
+    "outStock": 30,
+    "cupType": "ホット"
+  },
+  {
+    "date": "7月15日",
+    "inStock": 0,
+    "outStock": 20,
+    "cupType": "アイス"
+  },
+  {
+    "date": "7月15日",
+    "inStock": 0,
+    "outStock": 20,
+    "cupType": "ホット"
+  },
+  {
+    "date": "7月15日",
+    "inStock": 25,
+    "outStock": 0,
+    "cupType": "アイス"
+  },
+  {
+    "date": "7月15日",
+    "inStock": 25,
+    "outStock": 0,
+    "cupType": "ホット"
+  }
+]
