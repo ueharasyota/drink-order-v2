@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 
 export default function Home() {
   const router = useRouter();
@@ -8,11 +9,12 @@ export default function Home() {
   return (
     <div className="relative min-h-screen flex items-center justify-center bg-green-900 overflow-hidden font-serif">
       {/* 背景のコーヒーイラスト */}
-      <img
+      <Image
         src="https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&w=1470&q=80"
         alt="コーヒーイラスト"
-        className="absolute inset-0 w-full h-full object-cover opacity-30 blur-sm"
-        loading="lazy"
+        fill
+        className="absolute inset-0 object-cover opacity-30 blur-sm"
+        priority
       />
 
       {/* ボタンのコンテナ */}

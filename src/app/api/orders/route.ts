@@ -1,8 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/app/lib/supabaseClient';
+import { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@/lib/supabaseClient";
 
 // GET: 日付指定で注文取得
 export async function GET(request: NextRequest) {
+  const supabase = await createServerClient();
+
   const { searchParams } = new URL(request.url);
   const dateParam = searchParams.get("date");
 
@@ -22,8 +24,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: false, error: "注文データ取得失敗" }, { status: 500 });
   }
 
-
- // ここでキャメルケースに変換
+  // キャメルケースに変換
   const convertedData = data.map((order: any) => ({
     id: order.id,
     status: order.status,
@@ -33,76 +34,75 @@ export async function GET(request: NextRequest) {
     milk: order.milk,
     sugar: order.sugar,
     tableNumber: order.table_number,
-    paymentMethod: order.paymentMethod,
-    receiptStatus: order.receiptStatus,
-    cashAmount: order.cashAmount,
+    paymentMethod: order.payment_method,
+    receiptStatus: order.receipt_status,
+    cashAmount: order.cash_amount,
     note: order.note,
-    createdAt: order.createdAt,
+    createdAt: order.created_at,
   }));
 
-
   console.log("取得した注文データ:", data);
-  return NextResponse.json(data);
+  return NextResponse.json(convertedData);
 }
-
-
 
 // POST: 新規注文追加
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createServerClient();
+
     const newOrder = await request.json();
 
-    if (!newOrder || !newOrder.menu || !newOrder.table_number) {
-      return NextResponse.json({ success: false, error: '必要な項目が不足しています' }, { status: 400 });
+    if (!newOrder || !newOrder.menu || !newOrder.tableNumber) {
+      return NextResponse.json({ success: false, error: "必要な項目が不足しています" }, { status: 400 });
     }
 
     const orderWithMeta = {
       ...newOrder,
-      createdAt: new Date().toISOString(),
-      status: 'pending',
+      created_at: new Date().toISOString(),
+      status: "pending",
     };
 
     const { data, error } = await supabase
-      .from('orders')
+      .from("orders")
       .insert([orderWithMeta])
       .select();
 
     if (error) {
-       console.error("Supabase insert error:", error);
-      return NextResponse.json({ success: false, error: '注文の保存に失敗しました' }, { status: 500 });
+      console.error("Supabase insert error:", error);
+      return NextResponse.json({ success: false, error: "注文の保存に失敗しました" }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, order: data[0] });
   } catch (error) {
-    console.error('注文保存例外エラー:', error);
-    return NextResponse.json({ success: false, error: '注文の保存に失敗しました' }, { status: 500 });
+    console.error("注文保存例外エラー:", error);
+    return NextResponse.json({ success: false, error: "注文の保存に失敗しました" }, { status: 500 });
   }
 }
 
 // PATCH: 注文ステータス更新
 export async function PATCH(request: NextRequest) {
   try {
+    const supabase = await createServerClient();
+
     const { id, status } = await request.json();
 
-    if (typeof id !== 'number' || typeof status !== 'string') {
-      return NextResponse.json({ success: false, error: 'id と status は正しい型である必要があります' }, { status: 400 });
+    if (typeof id !== "number" || typeof status !== "string") {
+      return NextResponse.json({ success: false, error: "id と status は正しい型である必要があります" }, { status: 400 });
     }
 
     const { data, error } = await supabase
-      .from('orders')
+      .from("orders")
       .update({ status })
-      .eq('id', id)
+      .eq("id", id)
       .select();
 
     if (error || !data || data.length === 0) {
-      return NextResponse.json({ success: false, error: '注文状態の更新に失敗しました' }, { status: 500 });
+      return NextResponse.json({ success: false, error: "注文状態の更新に失敗しました" }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, order: data[0] });
   } catch (error) {
-    console.error('注文状態更新例外エラー:', error);
-    return NextResponse.json({ success: false, error: '注文状態の更新に失敗しました' }, { status: 500 });
+    console.error("注文状態更新例外エラー:", error);
+    return NextResponse.json({ success: false, error: "注文状態の更新に失敗しました" }, { status: 500 });
   }
-
-  
 }

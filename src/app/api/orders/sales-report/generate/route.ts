@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabaseClient";
+import { createServerClient } from "@/lib/supabaseClient";
 
 type PaymentMethodType = "現金" | "4円" | "1円" | "スロ" | "その他";
 
@@ -35,6 +35,8 @@ const normalizePaymentMethod = (method: string): PaymentMethodType => {
 
 export async function GET(request: NextRequest) {
   try {
+    const supabase = await createServerClient();
+
     const url = new URL(request.url);
     const dateParam = url.searchParams.get("date");
     if (!dateParam) {

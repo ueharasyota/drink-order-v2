@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import {
   LineChart,
   Line,
@@ -49,6 +49,14 @@ type DayChartData = {
   cashTotal: number;
 };
 
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+function getSupabaseClient(): SupabaseClient {
+  return createClient(supabaseUrl, supabaseAnonKey);
+}
+
+
 export default function SalesPage() {
   const [viewMode, setViewMode] = useState<'month' | 'day'>('month');
   const [selectedYear, setSelectedYear] = useState(2025);
@@ -75,8 +83,8 @@ export default function SalesPage() {
     }
   }, [viewMode, selectedYear, selectedMonth]);
 
-  async function fetchMonthlyData(year: number) {
-    const supabase = createClientComponentClient<Database>();
+async function fetchMonthlyData(year: number) {
+  const supabase = getSupabaseClient();
 
     const { data: orders, error } = await supabase
       .from('orders')
@@ -177,7 +185,7 @@ export default function SalesPage() {
   }
 
   async function fetchDailyData(year: number, month: number) {
-    const supabase = createClientComponentClient<Database>();
+  const supabase = getSupabaseClient();
 
     const start = dayjs(`${year}-${month}-01`).startOf('day').toISOString();
     const end = dayjs(`${year}-${month}-01`).endOf('month').endOf('day').toISOString();
@@ -206,7 +214,7 @@ export default function SalesPage() {
       dailyStats[dateKey] = { earlyCount: 0, lateCount: 0, cashTotal: 0 };
     }
 
-    orders.forEach((order) => {
+    orders.forEach((order: Database['orders']['Row']) => {
       if (order.status !== 'completed') return;
 
       const jst = dayjs.utc(order.createdAt).tz('Asia/Tokyo');

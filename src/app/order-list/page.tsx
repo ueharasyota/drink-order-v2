@@ -30,32 +30,55 @@ function formatDate(isoString: string): string {
   return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
 }
 
+type RawOrder = {
+  id: number;
+  created_at: string;
+  drink_type: 'ice' | 'hot';
+  menu: string;
+  price: number;
+  milk?: string;
+  sugar?: string;
+  table_number?: number | string;
+  payment_method?: string;
+  receipt_status?: string;
+  cash_amount?: number | string;
+  note?: string;
+  status: 'pending' | 'completed' | 'cancelled';
+};
+
 export default function OrdersPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
-  const [activeTab, setActiveTab] = useState<'pending'>('pending');
 
   const fetchOrders = async () => {
     try {
       const res = await fetch('/api/orders');
       if (!res.ok) throw new Error('注文データ取得失敗');
-      const data = await res.json();
+      const data: RawOrder[] = await res.json();
 
-      // APIの返却データのスネークケースをキャメルケースに変換
-      const mappedOrders = data.map((o: any) => ({
-        ...o,
-        tableNumber: o.table_number !== undefined ? String(o.table_number) : '',
-        paymentMethod: o.payment_method || o.paymentMethod || '',
-        receiptStatus: o.receipt_status || o.receiptStatus || '',
-        cashAmount: o.cash_amount !== undefined ? String(o.cash_amount) : o.cashAmount,
+      const mappedOrders: Order[] = data.map((o) => ({
+        id: o.id,
+        createdAt: o.created_at,
+        drinkType: o.drink_type,
+        menu: o.menu,
+        price: o.price,
         milk: o.milk || '',
         sugar: o.sugar || '',
+        tableNumber: o.table_number !== undefined ? String(o.table_number) : '',
+        paymentMethod: o.payment_method || '',
+        receiptStatus: o.receipt_status || '',
+        cashAmount: o.cash_amount !== undefined ? String(o.cash_amount) : undefined,
         note: o.note || '',
+        status: o.status,
       }));
 
       setOrders(mappedOrders);
     } catch (error) {
-      console.error('注文データの取得に失敗しました', error);
+      if (error instanceof Error) {
+        console.error('注文データの取得に失敗しました', error.message);
+      } else {
+        console.error('注文データの取得に失敗しました', error);
+      }
     }
   };
 
@@ -71,16 +94,20 @@ export default function OrdersPage() {
         body: JSON.stringify({ id, status: newStatus }),
       });
       if (!res.ok) throw new Error('状態更新失敗');
-      const json = await res.json();
+      const json: { success: boolean; error?: string } = await res.json();
       if (!json.success) throw new Error(json.error || '不明なエラー');
       await fetchOrders();
     } catch (error) {
-      console.error('状態変更に失敗しました', error);
+      if (error instanceof Error) {
+        console.error('状態変更に失敗しました', error.message);
+      } else {
+        console.error('状態変更に失敗しました', error);
+      }
       alert('状態変更に失敗しました。再度お試しください。');
     }
   };
 
-  const pendingOrders = orders.filter(o => o.status === 'pending');
+  const pendingOrders = orders.filter((o) => o.status === 'pending');
 
   const navItems = [
     { label: 'トップ', path: '/' },
@@ -147,64 +174,46 @@ function OrderList({
               ${order.status === 'cancelled' ? 'opacity-40 line-through' : ''}
             `}
           >
-            {/* 左：注文情報 */}
             <div className="flex flex-col justify-between flex-1 pr-6 min-w-0">
-              {/* 1行目：日時 */}
-              <div className="text-gray-600 text-sm mb-1 whitespace-nowrap">
-                {formatDate(order.createdAt)}
-              </div>
+              <div className="text-gray-600 text-sm mb-1 whitespace-nowrap">{formatDate(order.createdAt)}</div>
 
-              {/* 2行目：商品名（大きめ）＋台番号（大きめ）＋砂糖・ミルク（同じ行で詰めて配置） */}
               <div className="flex flex-wrap items-center gap-4 mb-1 min-w-0">
                 <span className="text-2xl font-bold text-[#004b38] truncate min-w-0">
                   {order.drinkType === 'ice' ? 'アイス' : 'ホット'} {order.menu}
                 </span>
-                <span className="text-2xl font-bold text-[#4b3b2b] whitespace-nowrap">
-                  {order.tableNumber}番台
-                </span>
-                <span className="text-lg text-[#4b3b2b] whitespace-nowrap">
-                  砂糖: {order.sugar}
-                </span>
-                <span className="text-lg text-[#4b3b2b] whitespace-nowrap">
-                  ミルク: {order.milk}
-                </span>
+                <span className="text-2xl font-bold text-[#4b3b2b] whitespace-nowrap">{order.tableNumber}番台</span>
+                <span className="text-lg text-[#4b3b2b] whitespace-nowrap">砂糖: {order.sugar}</span>
+                <span className="text-lg text-[#4b3b2b] whitespace-nowrap">ミルク: {order.milk}</span>
               </div>
 
-              {/* 3行目：支払情報と備考（やや大きめ、折り返しあり） */}
               <div className="text-lg text-[#4b3b2b] flex flex-wrap gap-6 break-words">
                 <span className="whitespace-nowrap truncate">支払: {order.paymentMethod}</span>
                 <span className="whitespace-nowrap truncate">受取: {order.receiptStatus}</span>
-                {order.cashAmount && (
-                  <span className="whitespace-nowrap truncate">金額: {order.cashAmount}円</span>
-                )}
-                <span className="truncate min-w-full sm:min-w-0">
-                  備考: {order.note || '（なし）'}
-                </span>
+                {order.cashAmount && <span className="whitespace-nowrap truncate">金額: {order.cashAmount}円</span>}
+                <span className="truncate min-w-full sm:min-w-0">備考: {order.note || '（なし）'}</span>
               </div>
             </div>
 
-            {/* 右：操作ボタン 横並び、正方形に近く、カード高に合わせる */}
             {order.status === 'pending' && onStatusChange && (
               <div className="flex flex-col sm:flex-row gap-3 items-center">
                 <button
-  onClick={() => onStatusChange(order.id, 'completed')}
-  className="bg-[#00704a] hover:bg-[#004b38] text-white rounded-lg text-lg font-semibold shadow-md
-    w-[80px] h-[80px] sm:w-[90px] sm:h-[90px] flex items-center justify-center"
-  aria-label="対応済"
-  type="button"
->
-  対応済
-</button>
-<button
-  onClick={() => onStatusChange(order.id, 'cancelled')}
-  className="bg-[#eee] hover:bg-[#ddd] text-[#333] rounded-lg text-lg font-semibold shadow-md
-    w-[80px] h-[80px] sm:w-[90px] sm:h-[90px] flex items-center justify-center"
-  aria-label="キャンセル"
-  type="button"
->
-  キャンセル
-</button>
-
+                  onClick={() => onStatusChange(order.id, 'completed')}
+                  className="bg-[#00704a] hover:bg-[#004b38] text-white rounded-lg text-lg font-semibold shadow-md
+                    w-[80px] h-[80px] sm:w-[90px] sm:h-[90px] flex items-center justify-center"
+                  aria-label="対応済"
+                  type="button"
+                >
+                  対応済
+                </button>
+                <button
+                  onClick={() => onStatusChange(order.id, 'cancelled')}
+                  className="bg-[#eee] hover:bg-[#ddd] text-[#333] rounded-lg text-lg font-semibold shadow-md
+                    w-[80px] h-[80px] sm:w-[90px] sm:h-[90px] flex items-center justify-center"
+                  aria-label="キャンセル"
+                  type="button"
+                >
+                  キャンセル
+                </button>
               </div>
             )}
           </div>

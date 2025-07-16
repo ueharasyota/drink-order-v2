@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+import { createServerClient } from "@/lib/supabaseClient";
 
 export async function GET(request: Request) {
+  const supabase = await createServerClient();
+
   const { searchParams } = new URL(request.url);
   const date = searchParams.get("date");
   const shift = searchParams.get("shift");
@@ -27,10 +25,13 @@ export async function GET(request: Request) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
   return NextResponse.json(data?.[0] ?? null);
 }
 
 export async function POST(request: Request) {
+  const supabase = await createServerClient();
+
   const body = await request.json();
   const { date, shift, drink_type, count } = body;
 
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
   if (existing && existing.length > 0) {
     const { error: updateError } = await supabase
       .from("start_cups")
-      .update({ count, updated_at: new Date() })
+      .update({ count, updated_at: new Date().toISOString() })
       .eq("id", existing[0].id);
 
     if (updateError) {

@@ -1,18 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabaseClient";
+import { createServerClient } from "@/lib/supabaseClient"; 
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { date, shift, diff, note } = body;
 
-    // diffが0の場合も許容するため、undefinedとnullのチェックに変更
     if (!date || !shift || diff === undefined || diff === null) {
       return NextResponse.json(
         { success: false, error: "必要なパラメータが不足しています" },
         { status: 400 }
       );
     }
+
+ const supabase = await createServerClient();
+
 
     const { error } = await supabase
       .from("sales_reports")

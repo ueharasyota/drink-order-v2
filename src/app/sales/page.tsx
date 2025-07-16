@@ -4,44 +4,72 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+const supabaseUrl: string = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+const supabaseKey: string = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-
 type PaymentMethodType = "現金" | "4円" | "1円" | "スロ" | "その他";
+type DrinkType = "ice" | "hot";
+type ShiftType = "early" | "late";
 
-type Order = {
+interface Order {
   id: number;
   createdAt: string;
-  drinkType: "ice" | "hot";
+  drinkType: DrinkType;
   menu: string;
   price: number;
   milk: string;
   sugar: string;
   tableNumber: number | string;
-  paymentMethod: string;
+  paymentMethod: PaymentMethodType | string;
   receiptStatus: string;
   cashAmount?: number;
   note: string;
   status: "pending" | "completed" | "cancelled";
-};
+}
 
-type ShiftSummary = {
+interface RawOrder {
+  id: number;
+  created_at?: string;
+  createdAt?: string;
+  drink_type: string | null;
+  menu?: string;
+  price?: number | string;
+  milk?: string;
+  sugar?: string;
+  table_number?: number | string;
+  paymentMethod?: string;
+  receiptStatus?: string;
+  cashAmount?: number | string | null;
+  note?: string;
+  status?: "pending" | "completed" | "cancelled";
+}
+
+interface ShiftSummary {
   total: number;
   ice: number;
   hot: number;
   sales: number;
-  byType300: { [key in PaymentMethodType]: number };
+  byType300: Record<PaymentMethodType, number>;
   sales300: number;
-  byType500: { [key in PaymentMethodType]: number };
+  byType500: Record<PaymentMethodType, number>;
   sales500: number;
-};
+}
 
-type StartCupState = {
-  early: { ice: number; hot: number };
-  late: { ice: number; hot: number };
-};
+interface StartCupState {
+  early: Record<DrinkType, number>;
+  late: Record<DrinkType, number>;
+}
+
+interface SalesReport {
+  date: string;
+  shift: ShiftType;
+  diff: string | number;
+  staff?: string;
+  note?: string;
+}
+
+const LOCAL_STORAGE_KEY = "startCupData";
 
 const initSummary = (): ShiftSummary => ({
   total: 0,
@@ -61,37 +89,24 @@ const normalizePaymentMethod = (method: string): PaymentMethodType => {
   if (method === "スロ") return "スロ";
   return "その他";
 };
-const validDrinkTypes = ["ice", "hot"] as const;
-type DrinkType = typeof validDrinkTypes[number];
 
-const toCamelCaseOrder = (raw: any): Order => {
-  if (!raw) {
-    throw new Error("rawデータがありません");
-  }
-
-  const drinkType: DrinkType = validDrinkTypes.includes(raw.drink_type)
+const toCamelCaseOrder = (raw: RawOrder): Order => {
+  const drinkType: DrinkType = raw.drink_type === "ice" || raw.drink_type === "hot"
     ? raw.drink_type
-    : (() => {
-        console.warn("無効な drink_type:", raw.drink_type);
-        return "ice";
-      })();
+    : "ice";
 
   return {
     id: raw.id,
     createdAt: raw.createdAt ?? raw.created_at ?? "",
-    drinkType: raw.drink_type,
+    drinkType,
     menu: raw.menu ?? "",
     price: Number(raw.price) || 0,
     milk: raw.milk ?? "",
     sugar: raw.sugar ?? "",
     tableNumber: raw.table_number ?? "",
-    paymentMethod:
-      typeof raw.paymentMethod === "string" ? raw.paymentMethod : "その他",
+    paymentMethod: typeof raw.paymentMethod === "string" ? raw.paymentMethod : "その他",
     receiptStatus: raw.receiptStatus ?? "",
-    cashAmount:
-      raw.cashAmount !== null && raw.cashAmount !== undefined
-        ? Number(raw.cashAmount)
-        : undefined,
+    cashAmount: raw.cashAmount !== null && raw.cashAmount !== undefined ? Number(raw.cashAmount) : undefined,
     note: raw.note ?? "",
     status: raw.status ?? "pending",
   };
@@ -100,75 +115,28 @@ const toCamelCaseOrder = (raw: any): Order => {
 export default function SalesPage() {
   const router = useRouter();
 
-  const saveStartCupToSupabase = async (
-  dateStr: string,
-  shift: "early" | "late",
-  drinkType: "ice" | "hot",
-  count: number
-) => {
-  try {
-    const { data: existing, error: selectError } = await supabase
-      .from("start_cups")
-      .select("id")
-      .eq("date", dateStr)
-      .eq("shift", shift)
-      .eq("drink_type", drinkType)
-      .limit(1)
-      .single();
-
-    if (selectError && selectError.code !== "PGRST116") {
-      throw selectError;
-    }
-
-    if (existing) {
-      const { error: updateError } = await supabase
-        .from("start_cups")
-        .update({ count })
-        .eq("id", existing.id);
-      if (updateError) throw updateError;
-    } else {
-      const { error: insertError } = await supabase
-        .from("start_cups")
-        .insert([{ date: dateStr, shift, drink_type: drinkType, count }]);
-      if (insertError) throw insertError;
-    }
-  } catch (e) {
-    console.error("スタートカップ保存失敗", e);
-    throw e;
-  }
-};
-
   const [orders, setOrders] = useState<Order[]>([]);
   const [early, setEarly] = useState<ShiftSummary>(initSummary());
   const [late, setLate] = useState<ShiftSummary>(initSummary());
-  const [adjustmentOpen, setAdjustmentOpen] = useState(false);
-const [diffValue, setDiffValue] = useState(0);
-const [staffName, setStaffName] = useState("");
-const [selectedShift, setSelectedShift] = useState<"early" | "late">("early");
-const [noDifferenceChecked, setNoDifferenceChecked] = useState(false);
-
-
-  const [selectedDate, setSelectedDate] = useState(new Date());
-
+  const [adjustmentOpen, setAdjustmentOpen] = useState<boolean>(false);
+  const [diffValue, setDiffValue] = useState<number>(0);
+  const [staffName, setStaffName] = useState<string>("");
+  const [selectedShift, setSelectedShift] = useState<ShiftType>("early");
+  const [noDifferenceChecked, setNoDifferenceChecked] = useState<boolean>(false);
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [startCup, setStartCupState] = useState<StartCupState>({
     early: { ice: 0, hot: 0 },
     late: { ice: 0, hot: 0 },
   });
+  const [keypadOpen, setKeypadOpen] = useState<boolean>(false);
+  const [keypadTarget, setKeypadTarget] = useState<{ shift: ShiftType; type: DrinkType } | null>(null);
+  const [keypadInput, setKeypadInput] = useState<string>("");
 
-  const [keypadOpen, setKeypadOpen] = useState(false);
-  const [keypadTarget, setKeypadTarget] = useState<{
-    shift: "early" | "late";
-    type: "ice" | "hot";
-  } | null>(null);
-  const [keypadInput, setKeypadInput] = useState("");
+  const [reportEarly, setReportEarly] = useState<SalesReport | null>(null);
+  const [reportLate, setReportLate] = useState<SalesReport | null>(null);
 
-const [reportEarly, setReportEarly] = useState<Report | null>(null);
-const [reportLate, setReportLate] = useState<Report | null>(null);
-
-  const LOCAL_STORAGE_KEY = "startCupData";
-
-  useEffect(() => {
-  const fetchStartCupFromSupabase = async () => {
+  /** Supabaseからstart_cupsテーブルの該当日の値を取得 */
+  const fetchStartCupFromSupabase = async (): Promise<void> => {
     const dateStr = selectedDate.toISOString().slice(0, 10);
     try {
       const { data, error } = await supabase
@@ -183,47 +151,51 @@ const [reportLate, setReportLate] = useState<Report | null>(null);
         late: { ice: 0, hot: 0 },
       };
 
-      data.forEach((row: any) => {
-        const shift = row.shift as "early" | "late";
-        const drink_type = row.drink_type as "ice" | "hot";
-        const count = row.count ?? 0;
-        initial[shift][drink_type] = count;
+      data?.forEach((row: { shift: ShiftType; drink_type: DrinkType; count?: number }) => {
+        initial[row.shift][row.drink_type] = row.count ?? 0;
       });
 
       setStartCupState(initial);
     } catch (e) {
       console.error("スタートカップ読み込み失敗", e);
-      // 失敗時はローカルストレージ読み込みを残すならここに処理を追加してもOK
+      // ローカルストレージから復元試み
+      try {
+        const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (saved) {
+          setStartCupState(JSON.parse(saved));
+        }
+      } catch {}
     }
   };
 
-  fetchStartCupFromSupabase();
-}, [selectedDate]);
-
-useEffect(() => {
-  const fetchReports = async () => {
-    const dateStr = selectedDate.toISOString().slice(0, 10);
+/** Supabaseから売上調整レポート取得 */
+const fetchReports = async (): Promise<void> => {
+  const dateStr = selectedDate.toISOString().slice(0, 10);
+  try {
     const { data, error } = await supabase
       .from("sales_reports")
       .select("*")
       .eq("date", dateStr);
 
-    if (error) {
-      console.error("報告データ取得エラー", error);
-      return;
+    if (error) throw error;
+
+    const typedData = data as SalesReport[] | null;
+
+    setReportEarly(typedData?.find(item => item.shift === "early") ?? null);
+    setReportLate(typedData?.find(item => item.shift === "late") ?? null);
+  } catch (e: unknown) {
+    if (e instanceof Error) {
+      console.error("報告データ取得エラー", e.message);
+    } else {
+      console.error("報告データ取得エラー", e);
     }
+  }
+};
 
-    setReportEarly(data.find((item) => item.shift === "early") || null);
-    setReportLate(data.find((item) => item.shift === "late") || null);
-  };
-
-  fetchReports();
-}, [selectedDate]);
-
-
+  /** スタートカップ状態更新 + ローカルストレージに保存 */
   const setStartCup = (
     updater: StartCupState | ((prev: StartCupState) => StartCupState)
-  ) => {
+  ): void => {
     setStartCupState((prev) => {
       const newState = typeof updater === "function" ? updater(prev) : updater;
       try {
@@ -235,30 +207,27 @@ useEffect(() => {
     });
   };
 
-  useEffect(() => {
-    fetchOrdersByDate(selectedDate);
-  }, [selectedDate]);
+  /** JST変換 */
+  const toJST = (date: Date): Date => new Date(date.getTime() + 9 * 60 * 60 * 1000);
 
-  const fetchOrdersByDate = async (date: Date) => {
+  /** 選択日付の注文データをAPIから取得し集計 */
+  const fetchOrdersByDate = async (date: Date): Promise<void> => {
     try {
       const dateStr = date.toISOString().slice(0, 10);
 
       const resOrders = await fetch(`/api/orders?date=${dateStr}`);
-      const text = await resOrders.text();
-      const rawData = text ? JSON.parse(text) : [];
+      if (!resOrders.ok) throw new Error(`Orders API error: ${resOrders.statusText}`);
 
-      const data: Order[] = rawData.map((raw: any) => toCamelCaseOrder(raw));
+      const rawData: RawOrder[] = await resOrders.json();
+      const data: Order[] = rawData.map(toCamelCaseOrder);
 
       const filtered = data.filter((o) => {
         if (!o.createdAt) return false;
-
         const created = new Date(o.createdAt);
         if (isNaN(created.getTime())) return false;
 
-        const createdJST = new Date(created.getTime() + 9 * 60 * 60 * 1000);
-        const createdDateStr = createdJST.toISOString().slice(0, 10);
-        const targetDateStr = date.toISOString().slice(0, 10);
-        return createdDateStr === targetDateStr;
+        const createdJST = toJST(created);
+        return createdJST.toISOString().slice(0, 10) === dateStr;
       });
 
       setOrders(filtered);
@@ -300,62 +269,95 @@ useEffect(() => {
     }
   };
 
-  const calcRemaining = (
-    shift: "early" | "late",
-    type: "ice" | "hot"
-  ): number => {
-    return Math.max(
-      startCup[shift][type] - (shift === "early" ? early : late)[type],
-      0
-    );
+  /** 指定シフト・種類の残りカップ数計算 */
+  const calcRemaining = (shift: ShiftType, type: DrinkType): number => {
+    return Math.max(startCup[shift][type] - (shift === "early" ? early : late)[type], 0);
   };
 
-const handleSubmitAdjustment = async () => {
-  const dateStr = selectedDate.toISOString().slice(0, 10);
-  const shift = selectedShift; 
+  /** スタートカップ保存（追加・更新） */
+  const saveStartCupToSupabase = async (
+    dateStr: string,
+    shift: ShiftType,
+    drinkType: DrinkType,
+    count: number
+  ): Promise<void> => {
+    try {
+      const { data: existing, error: selectError } = await supabase
+        .from("start_cups")
+        .select("id")
+        .eq("date", dateStr)
+        .eq("shift", shift)
+        .eq("drink_type", drinkType)
+        .limit(1)
+        .single();
 
+      if (selectError && selectError.code !== "PGRST116") {
+        throw selectError;
+      }
 
-  try {
-    const { data, error } = await supabase
-      .from("sales_reports")
-      .upsert([
-        {
-          date: dateStr,
-          shift,
-          diff: (noDifferenceChecked ? 0 : diffValue).toString(),
-          note: staffName,
-          staff: staffName,  // ここを追加
-        },
-      ], { onConflict: "date,shift" });
-
-    console.log("APIレスポンス:", { data, error });
-
-    if (error) {
-      throw error;
+      if (existing) {
+        const { error: updateError } = await supabase
+          .from("start_cups")
+          .update({ count })
+          .eq("id", existing.id);
+        if (updateError) throw updateError;
+      } else {
+        const { error: insertError } = await supabase
+          .from("start_cups")
+          .insert([{ date: dateStr, shift, drink_type: drinkType, count }]);
+        if (insertError) throw insertError;
+      }
+    } catch (e) {
+      console.error("スタートカップ保存失敗", e);
+      throw e;
     }
+  };
 
-    alert("調整額を保存しました！");
-    setAdjustmentOpen(false);
-  } catch (err) {
-    console.error("保存エラー:", err);
-    alert("保存に失敗しました");
-  }
-};
+  /** 売上調整保存 */
+  const handleSubmitAdjustment = async (): Promise<void> => {
+    const dateStr = selectedDate.toISOString().slice(0, 10);
+    const shift = selectedShift;
 
+    try {
+      const { data, error } = await supabase
+        .from("sales_reports")
+        .upsert(
+          [
+            {
+              date: dateStr,
+              shift,
+              diff: noDifferenceChecked ? 0 : diffValue,
+              note: staffName,
+              staff: staffName,
+            },
+          ],
+          { onConflict: "date,shift" }
+        );
 
-  const openKeypad = (shift: "early" | "late", type: "ice" | "hot") => {
+      if (error) throw error;
+
+      alert("調整額を保存しました！");
+      setAdjustmentOpen(false);
+    } catch (err) {
+      console.error("保存エラー:", err);
+      alert("保存に失敗しました");
+    }
+  };
+
+  /** キーパッド関連 */
+  const openKeypad = (shift: ShiftType, type: DrinkType): void => {
     setKeypadTarget({ shift, type });
     setKeypadInput(startCup[shift][type].toString());
     setKeypadOpen(true);
   };
 
-  const closeKeypad = () => {
+  const closeKeypad = (): void => {
     setKeypadOpen(false);
     setKeypadTarget(null);
     setKeypadInput("");
   };
 
-  const onKeypadInput = (num: string) => {
+  const onKeypadInput = (num: string): void => {
     if (keypadInput === "0") {
       setKeypadInput(num);
     } else {
@@ -363,464 +365,196 @@ const handleSubmitAdjustment = async () => {
     }
   };
 
-  const onKeypadDelete = () => {
+  const onKeypadDelete = (): void => {
     setKeypadInput((prev) => (prev.length <= 1 ? "" : prev.slice(0, -1)));
   };
 
-const onKeypadConfirm = async () => {
-  if (!keypadTarget) return;
-  const val = Number(keypadInput);
-  if (isNaN(val) || val < 0) {
-    alert("正しい数字を入力してください");
-    return;
-  }
+  const onKeypadConfirm = async (): Promise<void> => {
+    if (!keypadTarget) return;
+    const val = Number(keypadInput);
+    if (isNaN(val) || val < 0) {
+      alert("正しい数字を入力してください");
+      return;
+    }
 
-  const dateStr = selectedDate.toISOString().slice(0, 10);
-  try {
-    await saveStartCupToSupabase(dateStr, keypadTarget.shift, keypadTarget.type, val);
-    setStartCup((prev) => ({
-      ...prev,
-      [keypadTarget.shift]: {
-        ...prev[keypadTarget.shift],
-        [keypadTarget.type]: val,
-      },
-    }));
-  } catch {
-    alert("スタートカップの保存に失敗しました");
-  }
+    const dateStr = selectedDate.toISOString().slice(0, 10);
+    try {
+      await saveStartCupToSupabase(dateStr, keypadTarget.shift, keypadTarget.type, val);
+      setStartCup((prev) => ({
+        ...prev,
+        [keypadTarget.shift]: {
+          ...prev[keypadTarget.shift],
+          [keypadTarget.type]: val,
+        },
+      }));
+    } catch {
+      alert("スタートカップの保存に失敗しました");
+    }
 
-  closeKeypad();
-};
+    closeKeypad();
+  };
 
-
-  const calcSumByType = (byType: { [key in PaymentMethodType]: number }) => {
+  /** 種別別合計を計算 */
+  const calcSumByType = (byType: Record<PaymentMethodType, number>): number => {
     return (
       byType.現金 + byType["4円"] + byType["1円"] + byType.スロ + byType.その他
     );
   };
 
+  /** 支払い種別別テーブルレンダリング */
   const renderPaymentTable = (
     title: string,
-    byType: { [key in PaymentMethodType]: number },
-    sales: number
-  ) => {
-    const 合計杯数 = calcSumByType(byType);
-
-    return (
-      <div className="mb-4">
-        <h3 className="text-xl font-semibold mb-2 text-[#004b38]">{title}</h3>
-        <table className="table-auto w-full text-center border-collapse border border-gray-300">
-          <thead>
-            <tr className="bg-[#e6f2ec]">
-              <th className="border border-gray-300 p-2">現金</th>
-              <th className="border border-gray-300 p-2">4円</th>
-              <th className="border border-gray-300 p-2">1円</th>
-              <th className="border border-gray-300 p-2">スロ</th>
-              <th className="border border-gray-300 p-2">合計</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td className="border border-gray-300 p-2 font-semibold">
-                {byType.現金} 杯
-              </td>
-              <td className="border border-gray-300 p-2 font-semibold">
-                {byType["4円"]} 杯
-              </td>
-              <td className="border border-gray-300 p-2 font-semibold">
-                {byType["1円"]} 杯
-              </td>
-              <td className="border border-gray-300 p-2 font-semibold">
-                {byType.スロ} 杯
-              </td>
-              <td className="border border-gray-300 p-2 font-semibold">
-                {合計杯数} 杯
-              </td>
-            </tr>
-            <tr>
-              <td
-                className="border border-gray-300 p-2 font-semibold text-left"
-                colSpan={5}
-              >
-                現金売上：{sales.toLocaleString()} 円
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    );
-  };
-
-  const renderSummaryTable = (
-    label: string,
-    s: ShiftSummary,
-    shift: "early" | "late",
-    report: Report | null
-) => {
-  const 合計杯数 = s.ice + s.hot;
-  const 合計残カップ = calcRemaining(shift, "ice") + calcRemaining(shift, "hot");
-  const diff = report ? Number(report.diff) : 0;
-  const 合計現金売上 = s.sales + diff;
-
-    return (
-      <div className="bg-white rounded-2xl shadow-md p-6 w-full max-w-xl mx-auto mb-8">
-        <h2 className="text-2xl font-bold text-[#004b38] mb-4">{label}</h2>
-
-        <div className="mb-4 flex flex-col items-center gap-1 text-lg font-semibold text-[#004b38]">
-          <div className="flex gap-6">
-            <div className="text-center">
-              スタートカップ アイス:{" "}
-              <input
-                type="text"
-                readOnly
-                value={startCup[shift].ice}
-                className="w-20 text-center border border-[#004b38] rounded p-1 cursor-pointer bg-green-50"
-                onClick={() => openKeypad(shift, "ice")}
-              />{" "}
-              個
-            </div>
-            <div className="text-center">
-              スタートカップ ホット:{" "}
-              <input
-                type="text"
-                readOnly
-                value={startCup[shift].hot}
-                className="w-20 text-center border border-[#004b38] rounded p-1 cursor-pointer bg-green-50"
-                onClick={() => openKeypad(shift, "hot")}
-              />{" "}
-              個
-            </div>
-          </div>
-        </div>
-
-        <table className="table-auto w-full mb-4 text-center border-collapse border border-gray-300">
-          <thead>
-            <tr className="bg-[#e6f2ec]">
-              <th className="border border-gray-300 p-2"></th>
-              <th className="border border-gray-300 p-2">アイス</th>
-              <th className="border border-gray-300 p-2">ホット</th>
-              <th className="border border-gray-300 p-2">合計</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td className="border border-gray-300 p-2 font-semibold text-[#004b38]">
-                杯数
-              </td>
-              <td className="border border-gray-300 p-2">{s.ice} 杯</td>
-              <td className="border border-gray-300 p-2">{s.hot} 杯</td>
-              <td className="border border-gray-300 p-2">{合計杯数} 杯</td>
-            </tr>
-            <tr>
-              <td className="border border-gray-300 p-2 font-semibold text-[#004b38]">
-                残カップ数
-              </td>
-              <td className="border border-gray-300 p-2">
-                {calcRemaining(shift, "ice")} 個
-              </td>
-              <td className="border border-gray-300 p-2">
-                {calcRemaining(shift, "hot")} 個
-              </td>
-              <td className="border border-gray-300 p-2">{合計残カップ} 個</td>
-            </tr>
-          </tbody>
-        </table>
-
-        {renderPaymentTable("300円商品 支払内訳", s.byType300, s.sales300)}
-
-        {renderPaymentTable("500円商品 支払内訳", s.byType500, s.sales500)}
-
-    <div className="mb-3 text-right font-bold text-lg text-[#004b38]">
-        合計売上：{(s.sales300 + s.sales500).toLocaleString()} 円
-      </div>
-
-      <div className="mb-3 text-right font-bold text-lg text-[#004b38]">
-        合計現金売上（調整額込）：{合計現金売上.toLocaleString()} 円
-        {diff !== 0 && (
-          <span className="ml-3 text-sm text-gray-600">
-            （調整額 {diff > 0 ? "+" : ""}
-            {diff.toLocaleString()} 円）
-          </span>
-        )}
-      </div>
-    </div>
+    byType: Record<PaymentMethodType, number>,
+    salesTotal: number
+  ) => (
+    <>
+      <h4>{title}</h4>
+      <table>
+        <thead>
+          <tr>
+            {(["現金", "4円", "1円", "スロ", "その他"] as PaymentMethodType[]).map(
+              (method) => (
+                <th key={method}>{method}</th>
+              )
+            )}
+            <th>合計</th>
+            <th>売上</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            {(["現金", "4円", "1円", "スロ", "その他"] as PaymentMethodType[]).map(
+              (method) => (
+                <td key={method}>{byType[method]}</td>
+              )
+            )}
+            <td>{calcSumByType(byType)}</td>
+            <td>¥{salesTotal.toLocaleString()}</td>
+          </tr>
+        </tbody>
+      </table>
+    </>
   );
-};
 
-type Report = {
-  diff: string | number;
-  staff?: string;
-  note?: string;
-};
-
-function ReportInfo({ report }: { report: Report }) {
-  if (!report) return null;
-
-  const diff = Number(report.diff);
-  const staff = report.staff || report.note || "";
+  /** useEffectでデータ取得を連動 */
+  useEffect(() => {
+    fetchStartCupFromSupabase();
+    fetchReports();
+    fetchOrdersByDate(selectedDate);
+  }, [selectedDate]);
 
   return (
-    <div className="mb-4 p-3 bg-yellow-50 rounded border border-yellow-300 text-[#004b38] max-w-xl mx-auto">
-      {diff === 0 ? (
-        <div>
-          調整額：0円（{staff ? `担当者: ${staff}、誤差無し` : "誤差無し"}）
-        </div>
-      ) : (
-        <div>
-          調整額：{diff > 0 ? "+" : ""}
-          {diff.toLocaleString()}円
-          {staff && `（担当者: ${staff}）`}
-        </div>
-      )}
-    </div>
-  );
-}
-
-
-
-
-  const renderTotalTable = (label: string, s: ShiftSummary) => {
-    const 合計杯数 = s.ice + s.hot;
-
-    return (
-      <div className="bg-white rounded-2xl shadow-md p-6 w-full max-w-xl mx-auto mb-8">
-        <h2 className="text-2xl font-bold text-[#004b38] mb-4">{label}</h2>
-
-        <table className="table-auto w-full mb-4 text-center border-collapse border border-gray-300">
-          <thead>
-            <tr className="bg-[#e6f2ec]">
-              <th className="border border-gray-300 p-2">アイス</th>
-              <th className="border border-gray-300 p-2">ホット</th>
-              <th className="border border-gray-300 p-2">合計</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td className="border border-gray-300 p-2">{s.ice} 杯</td>
-                           <td className="border border-gray-300 p-2">{s.hot} 杯</td>
-              <td className="border border-gray-300 p-2">{合計杯数} 杯</td>
-            </tr>
-          </tbody>
-        </table>
-
-        {renderPaymentTable("300円商品 支払内訳", s.byType300, s.sales300)}
-
-        {renderPaymentTable("500円商品 支払内訳", s.byType500, s.sales500)}
-
-        <div className="mb-3 text-right font-bold text-lg text-[#004b38]">
-  合計現金売上：{s.sales.toLocaleString()} 円
-</div>
-
-      </div>
-    );
-  };
-
-  const onDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSelectedDate(new Date(e.target.value));
-  };
-
-  const goBack = () => {
-    router.back();
-  };
-
-const totalDiff =
-  (reportEarly ? Number(reportEarly.diff) : 0) +
-  (reportLate ? Number(reportLate.diff) : 0);
-
-  return (
-  <div className="p-6 bg-[#f8f5f0] min-h-screen">
-
-      <button
-        className="bg-[#004b38] text-white rounded-md px-5 py-2 mb-6 hover:bg-[#003424] transition-colors"
-        onClick={goBack}
-      >
-        戻る
-      </button>
-
-      <div className="mb-6 max-w-xl mx-auto">
-        <label
-          htmlFor="date"
-          className="block mb-2 font-bold text-[#004b38] text-lg"
-        >
-          集計日を選択してください
-        </label>
+    <main>
+      <h2>売上ページ</h2>
+      <label>
+        日付選択:
         <input
-          id="date"
           type="date"
           value={selectedDate.toISOString().slice(0, 10)}
-          onChange={onDateChange}
-          className="w-full border border-gray-300 rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-[#004b38]"
+          onChange={(e) => setSelectedDate(new Date(e.target.value))}
         />
-      </div>
+      </label>
 
-  {renderSummaryTable("早番集計 (〜16:50)", early, "early", reportEarly)}
-{reportEarly && <ReportInfo report={reportEarly} />}
+      <section>
+        <h3>早番スタートカップ数</h3>
+        <button onClick={() => openKeypad("early", "ice")}>
+          アイス: {startCup.early.ice}
+        </button>
+        <button onClick={() => openKeypad("early", "hot")}>
+          ホット: {startCup.early.hot}
+        </button>
+        <p>
+          残り: アイス {calcRemaining("early", "ice")}, ホット{" "}
+          {calcRemaining("early", "hot")}
+        </p>
+        {renderPaymentTable("300円種別別", early.byType300, early.sales300)}
+        {renderPaymentTable("500円種別別", early.byType500, early.sales500)}
+        <p>売上合計: ¥{early.sales.toLocaleString()}</p>
+      </section>
 
-{renderSummaryTable("遅番集計 (16:51～)", late, "late", reportLate)}
-{reportLate && <ReportInfo report={reportLate} />}
+      <section>
+        <h3>遅番スタートカップ数</h3>
+        <button onClick={() => openKeypad("late", "ice")}>
+          アイス: {startCup.late.ice}
+        </button>
+        <button onClick={() => openKeypad("late", "hot")}>
+          ホット: {startCup.late.hot}
+        </button>
+        <p>
+          残り: アイス {calcRemaining("late", "ice")}, ホット{" "}
+          {calcRemaining("late", "hot")}
+        </p>
+        {renderPaymentTable("300円種別別", late.byType300, late.sales300)}
+        {renderPaymentTable("500円種別別", late.byType500, late.sales500)}
+        <p>売上合計: ¥{late.sales.toLocaleString()}</p>
+      </section>
 
-{renderTotalTable(
-  "合計",
-  {
-    total: early.total + late.total,
-    ice: early.ice + late.ice,
-    hot: early.hot + late.hot,
-    sales: early.sales + late.sales + totalDiff,  // ←ここで調整額をプラス
-    byType300: {
-      現金: early.byType300.現金 + late.byType300.現金,
-      "4円": early.byType300["4円"] + late.byType300["4円"],
-      "1円": early.byType300["1円"] + late.byType300["1円"],
-      スロ: early.byType300.スロ + late.byType300.スロ,
-      その他: early.byType300.その他 + late.byType300.その他,
-    },
-    sales300: early.sales300 + late.sales300,
-    byType500: {
-      現金: early.byType500.現金 + late.byType500.現金,
-      "4円": early.byType500["4円"] + late.byType500["4円"],
-      "1円": early.byType500["1円"] + late.byType500["1円"],
-      スロ: early.byType500.スロ + late.byType500.スロ,
-      その他: early.byType500.その他 + late.byType500.その他,
-    },
-    sales500: early.sales500 + late.sales500,
-  }
-)}
-
-      
-      <div className="mb-8 text-center">
-  <button
-    className="bg-[#004b38] text-white rounded-md px-6 py-3 text-lg font-semibold hover:bg-[#003424] transition-colors"
-    onClick={() => setAdjustmentOpen(true)}
-  >
-    報告
-  </button>
-</div>
-
-      {/* 数字入力キーパッド */}
-      {keypadOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-lg">
-            <div className="mb-5 text-center text-xl font-semibold text-[#004b38]">
-              スタートカップ入力
-            </div>
-            <input
-              type="text"
-              className="w-full border border-gray-300 rounded-md p-3 mb-5 text-right text-3xl font-mono"
-              value={keypadInput}
-              readOnly
-            />
-            <div className="grid grid-cols-3 gap-4 mb-5">
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-                <button
-                  key={num}
-                  className="bg-[#004b38] hover:bg-[#003424] text-white rounded-lg py-3 text-2xl font-semibold transition-colors"
-                  onClick={() => onKeypadInput(num.toString())}
-                >
-                  {num}
-                </button>
-              ))}
-              <button
-                className="bg-gray-300 hover:bg-gray-400 rounded-lg py-3 text-2xl font-semibold transition-colors"
-                onClick={onKeypadDelete}
-              >
-                ←
-              </button>
-              <button
-                className="bg-[#004b38] hover:bg-[#003424] text-white rounded-lg py-3 text-2xl font-semibold transition-colors"
-                onClick={() => onKeypadInput("0")}
-              >
-                0
-              </button>
-              <button
-                className="bg-red-600 hover:bg-red-700 text-white rounded-lg py-3 text-2xl font-semibold transition-colors"
-                onClick={closeKeypad}
-              >
-                ×
-              </button>
-            </div>
-            <button
-              className="bg-green-700 hover:bg-green-800 text-white rounded-lg py-3 w-full text-2xl font-semibold transition-colors"
-              onClick={onKeypadConfirm}
-            >
-              確定
-            </button>
-          </div>
-        </div>
-      )}
-
-      {adjustmentOpen && (
-  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-    <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-lg">
-      <div className="mb-5 text-center text-xl font-semibold text-[#004b38]">
-        売上調整報告
-      </div>
-
-      <div className="mb-4">
-
-        <div className="mb-4">
-  <label className="block mb-1 font-bold">シフト選択</label>
-  <select
-    value={selectedShift}
-    onChange={(e) => setSelectedShift(e.target.value as "early" | "late")}
-    className="w-full border rounded-md p-2"
-  >
-    <option value="early">早番</option>
-    <option value="late">遅番</option>
-  </select>
-</div>
-
-        <label className="block mb-1 font-bold">調整額 (±円)</label>
-        <input
-  type="number"
-  value={noDifferenceChecked ? 0 : diffValue === 0 ? "" : diffValue}
-  onChange={(e) => {
-    const val = e.target.value;
-    // 空文字は0として扱うなら別途調整可能
-    setDiffValue(val === "" ? 0 : Number(val));
-  }}
-  disabled={noDifferenceChecked}
-  className="w-full border rounded-md p-2"
-/>
-      </div>
-
-      <div className="mb-4">
-        <label className="block mb-1 font-bold">担当者名 (任意)</label>
-        <input
-          type="text"
-          value={staffName}
-          onChange={(e) => setStaffName(e.target.value)}
-          className="w-full border rounded-md p-2"
-        />
-      </div>
-
-      <div className="mb-4">
-        <label className="flex items-center">
+      <section>
+        <h3>売上調整</h3>
+        <label>
+          シフト選択:
+          <select
+            value={selectedShift}
+            onChange={(e) => setSelectedShift(e.target.value as ShiftType)}
+          >
+            <option value="early">早番</option>
+            <option value="late">遅番</option>
+          </select>
+        </label>
+        <label>
+          差額（調整額）:
+          <input
+            type="number"
+            value={diffValue}
+            onChange={(e) => setDiffValue(Number(e.target.value))}
+            disabled={noDifferenceChecked}
+          />
+        </label>
+        <label>
           <input
             type="checkbox"
             checked={noDifferenceChecked}
-            onChange={(e) => setNoDifferenceChecked(e.target.checked)}
-            className="mr-2"
+            onChange={() => {
+              setNoDifferenceChecked((prev) => !prev);
+              if (!noDifferenceChecked) setDiffValue(0);
+            }}
           />
-          誤算無し
+          差額なし
         </label>
-      </div>
+        <label>
+          担当スタッフ名:
+          <input
+            type="text"
+            value={staffName}
+            onChange={(e) => setStaffName(e.target.value)}
+          />
+        </label>
+        <button onClick={handleSubmitAdjustment}>調整を保存</button>
+      </section>
 
-      <button
-        className="bg-green-700 hover:bg-green-800 text-white rounded-lg py-3 w-full text-2xl font-semibold transition-colors"
-        onClick={handleSubmitAdjustment}
-      >
-        保存
-      </button>
-      <button
-        className="mt-3 bg-gray-300 hover:bg-gray-400 text-black rounded-lg py-2 w-full text-lg font-semibold transition-colors"
-        onClick={() => setAdjustmentOpen(false)}
-      >
-        閉じる
-      </button>
-    </div>
-  </div>
-)}
-
-    </div>
+      {keypadOpen && (
+        <div className="keypad">
+          <h3>
+            スタートカップ入力 ({keypadTarget?.shift} - {keypadTarget?.type})
+          </h3>
+          <input
+            type="text"
+            value={keypadInput}
+            readOnly
+            style={{ fontSize: "2rem", width: "100%" }}
+          />
+          <div>
+            {["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"].map((num) => (
+              <button key={num} onClick={() => onKeypadInput(num)}>
+                {num}
+              </button>
+            ))}
+            <button onClick={onKeypadDelete}>削除</button>
+            <button onClick={onKeypadConfirm}>決定</button>
+            <button onClick={closeKeypad}>キャンセル</button>
+          </div>
+        </div>
+      )}
+    </main>
   );
 }
-
