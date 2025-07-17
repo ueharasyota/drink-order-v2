@@ -121,18 +121,19 @@ export default function NewOrderForm() {
     return;
   }
 
-    const newOrder = {
-      drink_type: drinkType, 
-      menu,
-      price: getPrice(),
-      milk,
-      sugar,
-       table_number: parseInt(tableNumber, 10), // ✅ 修正ここ！
-      paymentMethod,
-      receiptStatus,
-      cashAmount: cashAmount || undefined,
-      note,
-    };
+   const newOrder = {
+  drink_type: drinkType,
+  menu,
+  price: getPrice(),
+  milk,
+  sugar,
+  table_number: parseInt(tableNumber, 10),
+  payment_method: paymentMethod,
+  receipt_status: receiptStatus,
+  cash_amount: cashAmount || undefined,
+  note,
+};
+
 
     const res = await fetch('/api/orders', {
       method: 'POST',
@@ -160,6 +161,7 @@ export default function NewOrderForm() {
       onSubmit={handleSubmit}
       className="max-w-3xl mx-auto p-6 space-y-6 text-xl bg-[#f5f3ef] font-sans text-[#4b3b2b] rounded-lg shadow-lg"
     >
+      
       <h1 className="text-3xl font-extrabold mb-6 text-[#00704a] text-center tracking-wide">新規オーダー</h1>
 
       <div className="flex gap-8 justify-center mb-6">
