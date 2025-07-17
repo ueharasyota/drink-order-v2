@@ -49,19 +49,35 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerClient();
+    const body = await request.json();
 
-    const newOrder = await request.json();
-
-    if (!newOrder || !newOrder.menu || !newOrder.tableNumber) {
-      return NextResponse.json({ success: false, error: "必要な項目が不足しています" }, { status: 400 });
+    /* ---------- ① 必須チェック ---------- */
+    // camelCase(tableNumber) でも snake_case(table_number) でも OK にする
+    const tableNum = body.table_number ?? body.tableNumber;
+    if (!body.menu || !tableNum) {
+      return NextResponse.json(
+        { success: false, error: "必要な項目が不足しています" },
+        { status: 400 }
+      );
     }
 
+    /* ---------- ② camel → snake に整形 ---------- */
     const orderWithMeta = {
-      ...newOrder,
-      created_at: new Date().toISOString(),
+      drink_type: body.drink_type,
+      menu: body.menu,
+      price: body.price,
+      milk: body.milk,
+      sugar: body.sugar,
+      table_number: tableNum,
+      payment_method: body.payment_method ?? body.paymentMethod,
+      receipt_status: body.receipt_status ?? body.receiptStatus,
+      cash_amount: body.cash_amount ?? body.cashAmount,
+      note: body.note,
       status: "pending",
+      created_at: new Date().toISOString(),
     };
 
+    /* ---------- ③ Supabase へ INSERT ---------- */
     const { data, error } = await supabase
       .from("orders")
       .insert([orderWithMeta])
@@ -69,15 +85,22 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error("Supabase insert error:", error);
-      return NextResponse.json({ success: false, error: "注文の保存に失敗しました" }, { status: 500 });
+      return NextResponse.json(
+        { success: false, error: "注文の保存に失敗しました" },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ success: true, order: data[0] });
-  } catch (error) {
-    console.error("注文保存例外エラー:", error);
-    return NextResponse.json({ success: false, error: "注文の保存に失敗しました" }, { status: 500 });
+  } catch (err) {
+    console.error("注文保存例外エラー:", err);
+    return NextResponse.json(
+      { success: false, error: "注文の保存に失敗しました" },
+      { status: 500 }
+    );
   }
 }
+
 
 // PATCH: 注文ステータス更新
 export async function PATCH(request: NextRequest) {
