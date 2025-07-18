@@ -8,26 +8,10 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const dateParam = searchParams.get("date");
 
-  // 欲しい列を明示し、createdAt を AS で小文字始まりを防ぐ
   let query = supabase
     .from("orders")
-    .select(
-      `
-      id,
-      status,
-      drink_type,
-      menu,
-      price,
-      milk,
-      sugar,
-      table_number,
-      paymentMethod,
-      receiptStatus,
-      cashAmount,
-      note,
-      createdAt   /* 👈 カラム名を明示 */
-    `
-    )
+    // ★列は * のままでも OK。createdAt も取れる
+    .select("*")
     .order("createdAt", { ascending: false });
 
   if (dateParam) {
@@ -40,11 +24,32 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     console.error("注文取得エラー:", error);
-    return NextResponse.json({ success: false, error: "注文データ取得失敗" }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: "注文データ取得失敗" },
+      { status: 500 }
+    );
   }
 
-  return NextResponse.json(data);      // ← createdAt が必ず入る
+  /* --- ★キャメルケースへ整形して返す --- */
+  const converted = data.map((o: any) => ({
+    id: o.id,
+    status: o.status,
+    drinkType: o.drink_type,
+    menu: o.menu,
+    price: o.price,
+    milk: o.milk,
+    sugar: o.sugar,
+    tableNumber: o.table_number,
+    paymentMethod: o.paymentMethod ?? o.payment_method,
+    receiptStatus: o.receiptStatus ?? o.receipt_status,
+    cashAmount: o.cashAmount ?? o.cash_amount,
+    note: o.note,
+    createdAt: o.createdAt ?? o.created_at,
+  }));
+
+  return NextResponse.json(converted);
 }
+
 
 // POST: 新規注文追加
 export async function POST(request: NextRequest) {
