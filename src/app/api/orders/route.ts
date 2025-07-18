@@ -8,12 +8,31 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const dateParam = searchParams.get("date");
 
-  let query = supabase.from("orders").select("*").order("createdAt", { ascending: false });
+  // 欲しい列を明示し、createdAt を AS で小文字始まりを防ぐ
+  let query = supabase
+    .from("orders")
+    .select(
+      `
+      id,
+      status,
+      drink_type,
+      menu,
+      price,
+      milk,
+      sugar,
+      table_number,
+      paymentMethod,
+      receiptStatus,
+      cashAmount,
+      note,
+      createdAt   /* 👈 カラム名を明示 */
+    `
+    )
+    .order("createdAt", { ascending: false });
 
   if (dateParam) {
     const from = `${dateParam}T00:00:00+09:00`;
     const to = `${dateParam}T23:59:59+09:00`;
-
     query = query.gte("createdAt", from).lte("createdAt", to);
   }
 
@@ -24,8 +43,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: false, error: "注文データ取得失敗" }, { status: 500 });
   }
 
-  console.log("取得した注文データ:", data);
-  return NextResponse.json(data); // DBのカラム名にそのまま合わせる
+  return NextResponse.json(data);      // ← createdAt が必ず入る
 }
 
 // POST: 新規注文追加
