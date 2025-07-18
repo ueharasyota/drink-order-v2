@@ -24,25 +24,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: false, error: "注文データ取得失敗" }, { status: 500 });
   }
 
-  // キャメルケースに変換
-  const convertedData = data.map((order: any) => ({
-    id: order.id,
-    status: order.status,
-    drinkType: order.drink_type,
-    menu: order.menu,
-    price: order.price,
-    milk: order.milk,
-    sugar: order.sugar,
-    tableNumber: order.table_number,
-    paymentMethod: order.payment_method,
-    receiptStatus: order.receipt_status,
-    cashAmount: order.cash_amount,
-    note: order.note,
-    createdAt: order.created_at,
-  }));
-
   console.log("取得した注文データ:", data);
-  return NextResponse.json(convertedData);
+  return NextResponse.json(data); // DBのカラム名にそのまま合わせる
 }
 
 // POST: 新規注文追加
@@ -52,8 +35,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     /* ---------- ① 必須チェック ---------- */
-    // camelCase(tableNumber) でも snake_case(table_number) でも OK にする
-    const tableNum = body.table_number ?? body.tableNumber;
+    const tableNum = body.tableNumber ?? body.table_number;
     if (!body.menu || !tableNum) {
       return NextResponse.json(
         { success: false, error: "必要な項目が不足しています" },
@@ -61,27 +43,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    /* ---------- ② camel → snake に整形 ---------- */
+    /* ---------- ② DBカラム名に合わせて整形 (camelCase) ---------- */
     const orderWithMeta = {
-      drink_type: body.drink_type,
+      drink_type: body.drinkType ?? body.drink_type, // DBでsnake_caseなら維持
       menu: body.menu,
       price: body.price,
       milk: body.milk,
       sugar: body.sugar,
-      table_number: tableNum,
-      payment_method: body.payment_method ?? body.paymentMethod,
-      receipt_status: body.receipt_status ?? body.receiptStatus,
-      cash_amount: body.cash_amount ?? body.cashAmount,
+      table_number: tableNum, // DBでsnake_caseなら維持
+      paymentMethod: body.paymentMethod ?? body.payment_method,
+      receiptStatus: body.receiptStatus ?? body.receipt_status,
+      cashAmount: body.cashAmount ?? body.cash_amount,
       note: body.note,
       status: "pending",
-      created_at: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
     };
 
-    /* ---------- ③ Supabase へ INSERT ---------- */
-    const { data, error } = await supabase
-      .from("orders")
-      .insert([orderWithMeta])
-      .select();
+    /* ---------- ③ SupabaseへINSERT ---------- */
+    const { data, error } = await supabase.from("orders").insert([orderWithMeta]).select();
 
     if (error) {
       console.error("Supabase insert error:", error);
@@ -101,7 +80,6 @@ export async function POST(request: NextRequest) {
   }
 }
 
-
 // PATCH: 注文ステータス更新
 export async function PATCH(request: NextRequest) {
   try {
@@ -110,22 +88,27 @@ export async function PATCH(request: NextRequest) {
     const { id, status } = await request.json();
 
     if (typeof id !== "number" || typeof status !== "string") {
-      return NextResponse.json({ success: false, error: "id と status は正しい型である必要があります" }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: "id と status は正しい型である必要があります" },
+        { status: 400 }
+      );
     }
 
-    const { data, error } = await supabase
-      .from("orders")
-      .update({ status })
-      .eq("id", id)
-      .select();
+    const { data, error } = await supabase.from("orders").update({ status }).eq("id", id).select();
 
     if (error || !data || data.length === 0) {
-      return NextResponse.json({ success: false, error: "注文状態の更新に失敗しました" }, { status: 500 });
+      return NextResponse.json(
+        { success: false, error: "注文状態の更新に失敗しました" },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ success: true, order: data[0] });
   } catch (error) {
     console.error("注文状態更新例外エラー:", error);
-    return NextResponse.json({ success: false, error: "注文状態の更新に失敗しました" }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: "注文状態の更新に失敗しました" },
+      { status: 500 }
+    );
   }
 }
