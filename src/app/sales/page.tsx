@@ -1,49 +1,17 @@
 'use client';
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
+import React, { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl: string = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const supabaseKey: string = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+// Supabase 初期化
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-type PaymentMethodType = "現金" | "4円" | "1円" | "スロ" | "その他";
-type DrinkType = "ice" | "hot";
-type ShiftType = "early" | "late";
-
-interface Order {
-  id: number;
-  createdAt: string;
-  drinkType: DrinkType;
-  menu: string;
-  price: number;
-  milk: string;
-  sugar: string;
-  tableNumber: number | string;
-  paymentMethod: PaymentMethodType | string;
-  receiptStatus: string;
-  cashAmount?: number;
-  note: string;
-  status: "pending" | "completed" | "cancelled";
-}
-
-interface RawOrder {
-  id: number;
-  created_at?: string;
-  createdAt?: string;
-  drink_type: string | null;
-  menu?: string;
-  price?: number | string;
-  milk?: string;
-  sugar?: string;
-  table_number?: number | string;
-  paymentMethod?: string;
-  receiptStatus?: string;
-  cashAmount?: number | string | null;
-  note?: string;
-  status?: "pending" | "completed" | "cancelled";
-}
+type PaymentMethodType = '現金' | '4円' | '1円' | 'スロ' | 'その他';
+type DrinkType = 'ice' | 'hot';
+type ShiftType = 'early' | 'late';
 
 interface ShiftSummary {
   total: number;
@@ -61,500 +29,573 @@ interface StartCupState {
   late: Record<DrinkType, number>;
 }
 
+// ★ adjusted_sales に合わせてフィールド名を変更
 interface SalesReport {
+  id: number;
   date: string;
   shift: ShiftType;
-  diff: string | number;
-  staff?: string;
-  note?: string;
+  diff: number;
+  staff: string | null;
+  note: string | null;
+  adjusted_sales: number;   // ← adjusted → adjusted_sales
 }
 
-const LOCAL_STORAGE_KEY = "startCupData";
-
+const LOCAL_STORAGE_KEY = 'startCupData';
 const initSummary = (): ShiftSummary => ({
   total: 0,
   ice: 0,
   hot: 0,
   sales: 0,
-  byType300: { 現金: 0, "4円": 0, "1円": 0, スロ: 0, その他: 0 },
+  byType300: { 現金: 0, '4円': 0, '1円': 0, スロ: 0, その他: 0 },
   sales300: 0,
-  byType500: { 現金: 0, "4円": 0, "1円": 0, スロ: 0, その他: 0 },
+  byType500: { 現金: 0, '4円': 0, '1円': 0, スロ: 0, その他: 0 },
   sales500: 0,
 });
 
-const normalizePaymentMethod = (method: string): PaymentMethodType => {
-  if (method === "現金") return "現金";
-  if (method === "4円" || method === "4パチ") return "4円";
-  if (method === "1円" || method === "1パチ") return "1円";
-  if (method === "スロ") return "スロ";
-  return "その他";
+const normalizePaymentMethod = (m: string): PaymentMethodType => {
+  if (m === '現金') return '現金';
+  if (m === '4円' || m === '4パチ') return '4円';
+  if (m === '1円' || m === '1パチ') return '1円';
+  if (m === 'スロ') return 'スロ';
+  return 'その他';
 };
 
-const toCamelCaseOrder = (raw: RawOrder): Order => {
-  const drinkType: DrinkType = raw.drink_type === "ice" || raw.drink_type === "hot"
-    ? raw.drink_type
-    : "ice";
+// 種別テーブルコンポーネント
+function PaymentTable({
+  title,
+  byType,
+}: {
+  title: string;
+  byType: Record<PaymentMethodType, number>;
+}) {
+  const methods = ['現金', '4円', '1円', 'スロ'] as PaymentMethodType[];
+  const countSum = methods.reduce((sum, m) => sum + byType[m], 0);
 
-  return {
-    id: raw.id,
-    createdAt: raw.createdAt ?? raw.created_at ?? "",
-    drinkType,
-    menu: raw.menu ?? "",
-    price: Number(raw.price) || 0,
-    milk: raw.milk ?? "",
-    sugar: raw.sugar ?? "",
-    tableNumber: raw.table_number ?? "",
-    paymentMethod: typeof raw.paymentMethod === "string" ? raw.paymentMethod : "その他",
-    receiptStatus: raw.receiptStatus ?? "",
-    cashAmount: raw.cashAmount !== null && raw.cashAmount !== undefined ? Number(raw.cashAmount) : undefined,
-    note: raw.note ?? "",
-    status: raw.status ?? "pending",
-  };
-};
-
-export default function SalesPage() {
-  const router = useRouter();
-
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [early, setEarly] = useState<ShiftSummary>(initSummary());
-  const [late, setLate] = useState<ShiftSummary>(initSummary());
-  const [adjustmentOpen, setAdjustmentOpen] = useState<boolean>(false);
-  const [diffValue, setDiffValue] = useState<number>(0);
-  const [staffName, setStaffName] = useState<string>("");
-  const [selectedShift, setSelectedShift] = useState<ShiftType>("early");
-  const [noDifferenceChecked, setNoDifferenceChecked] = useState<boolean>(false);
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [startCup, setStartCupState] = useState<StartCupState>({
-    early: { ice: 0, hot: 0 },
-    late: { ice: 0, hot: 0 },
-  });
-  const [keypadOpen, setKeypadOpen] = useState<boolean>(false);
-  const [keypadTarget, setKeypadTarget] = useState<{ shift: ShiftType; type: DrinkType } | null>(null);
-  const [keypadInput, setKeypadInput] = useState<string>("");
-
-  const [reportEarly, setReportEarly] = useState<SalesReport | null>(null);
-  const [reportLate, setReportLate] = useState<SalesReport | null>(null);
-
-  /** Supabaseからstart_cupsテーブルの該当日の値を取得 */
-  const fetchStartCupFromSupabase = async (): Promise<void> => {
-    const dateStr = selectedDate.toISOString().slice(0, 10);
-    try {
-      const { data, error } = await supabase
-        .from("start_cups")
-        .select("shift, drink_type, count")
-        .eq("date", dateStr);
-
-      if (error) throw error;
-
-      const initial: StartCupState = {
-        early: { ice: 0, hot: 0 },
-        late: { ice: 0, hot: 0 },
-      };
-
-      data?.forEach((row: { shift: ShiftType; drink_type: DrinkType; count?: number }) => {
-        initial[row.shift][row.drink_type] = row.count ?? 0;
-      });
-
-      setStartCupState(initial);
-    } catch (e) {
-      console.error("スタートカップ読み込み失敗", e);
-      // ローカルストレージから復元試み
-      try {
-        const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
-        if (saved) {
-          setStartCupState(JSON.parse(saved));
-        }
-      } catch {}
-    }
-  };
-
-/** Supabaseから売上調整レポート取得 */
-const fetchReports = async (): Promise<void> => {
-  const dateStr = selectedDate.toISOString().slice(0, 10);
-  try {
-    const { data, error } = await supabase
-      .from("sales_reports")
-      .select("*")
-      .eq("date", dateStr);
-
-    if (error) throw error;
-
-    const typedData = data as SalesReport[] | null;
-
-    setReportEarly(typedData?.find(item => item.shift === "early") ?? null);
-    setReportLate(typedData?.find(item => item.shift === "late") ?? null);
-  } catch (e: unknown) {
-    if (e instanceof Error) {
-      console.error("報告データ取得エラー", e.message);
-    } else {
-      console.error("報告データ取得エラー", e);
-    }
-  }
-};
-
-  /** スタートカップ状態更新 + ローカルストレージに保存 */
-  const setStartCup = (
-    updater: StartCupState | ((prev: StartCupState) => StartCupState)
-  ): void => {
-    setStartCupState((prev) => {
-      const newState = typeof updater === "function" ? updater(prev) : updater;
-      try {
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newState));
-      } catch (e) {
-        console.error("スタートカップ保存失敗", e);
-      }
-      return newState;
-    });
-  };
-
-  /** JST変換 */
-  const toJST = (date: Date): Date => new Date(date.getTime() + 9 * 60 * 60 * 1000);
-
-  /** 選択日付の注文データをAPIから取得し集計 */
-  const fetchOrdersByDate = async (date: Date): Promise<void> => {
-    try {
-      const dateStr = date.toISOString().slice(0, 10);
-
-      const resOrders = await fetch(`/api/orders?date=${dateStr}`);
-      if (!resOrders.ok) throw new Error(`Orders API error: ${resOrders.statusText}`);
-
-      const rawData: RawOrder[] = await resOrders.json();
-      const data: Order[] = rawData.map(toCamelCaseOrder);
-
-      const filtered = data.filter((o) => {
-        if (!o.createdAt) return false;
-        const created = new Date(o.createdAt);
-        if (isNaN(created.getTime())) return false;
-
-        const createdJST = toJST(created);
-        return createdJST.toISOString().slice(0, 10) === dateStr;
-      });
-
-      setOrders(filtered);
-
-      const cutoff = new Date(`${dateStr}T16:50:00`);
-      const completed = filtered.filter((o) => o.status === "completed");
-
-      const earlySummary = initSummary();
-      const lateSummary = initSummary();
-
-      completed.forEach((order) => {
-        const time = new Date(order.createdAt);
-        const target = time <= cutoff ? earlySummary : lateSummary;
-
-        target.total += 1;
-        target[order.drinkType] += 1;
-
-        const normalizedMethod = normalizePaymentMethod(order.paymentMethod);
-
-        if (normalizedMethod !== "その他") {
-          if (order.price === 300) {
-            target.byType300[normalizedMethod] += 1;
-            if (normalizedMethod === "現金") target.sales300 += order.price;
-          } else if (order.price === 500) {
-            target.byType500[normalizedMethod] += 1;
-            if (normalizedMethod === "現金") target.sales500 += order.price;
-          }
-        }
-
-        if (normalizedMethod === "現金") {
-          target.sales += order.price;
-        }
-      });
-
-      setEarly(earlySummary);
-      setLate(lateSummary);
-    } catch (error) {
-      console.error("データ取得失敗", error);
-    }
-  };
-
-  /** 指定シフト・種類の残りカップ数計算 */
-  const calcRemaining = (shift: ShiftType, type: DrinkType): number => {
-    return Math.max(startCup[shift][type] - (shift === "early" ? early : late)[type], 0);
-  };
-
-  /** スタートカップ保存（追加・更新） */
-  const saveStartCupToSupabase = async (
-    dateStr: string,
-    shift: ShiftType,
-    drinkType: DrinkType,
-    count: number
-  ): Promise<void> => {
-    try {
-      const { data: existing, error: selectError } = await supabase
-        .from("start_cups")
-        .select("id")
-        .eq("date", dateStr)
-        .eq("shift", shift)
-        .eq("drink_type", drinkType)
-        .limit(1)
-        .single();
-
-      if (selectError && selectError.code !== "PGRST116") {
-        throw selectError;
-      }
-
-      if (existing) {
-        const { error: updateError } = await supabase
-          .from("start_cups")
-          .update({ count })
-          .eq("id", existing.id);
-        if (updateError) throw updateError;
-      } else {
-        const { error: insertError } = await supabase
-          .from("start_cups")
-          .insert([{ date: dateStr, shift, drink_type: drinkType, count }]);
-        if (insertError) throw insertError;
-      }
-    } catch (e) {
-      console.error("スタートカップ保存失敗", e);
-      throw e;
-    }
-  };
-
-  /** 売上調整保存 */
-  const handleSubmitAdjustment = async (): Promise<void> => {
-    const dateStr = selectedDate.toISOString().slice(0, 10);
-    const shift = selectedShift;
-
-    try {
-      const { data, error } = await supabase
-        .from("sales_reports")
-        .upsert(
-          [
-            {
-              date: dateStr,
-              shift,
-              diff: noDifferenceChecked ? 0 : diffValue,
-              note: staffName,
-              staff: staffName,
-            },
-          ],
-          { onConflict: "date,shift" }
-        );
-
-      if (error) throw error;
-
-      alert("調整額を保存しました！");
-      setAdjustmentOpen(false);
-    } catch (err) {
-      console.error("保存エラー:", err);
-      alert("保存に失敗しました");
-    }
-  };
-
-  /** キーパッド関連 */
-  const openKeypad = (shift: ShiftType, type: DrinkType): void => {
-    setKeypadTarget({ shift, type });
-    setKeypadInput(startCup[shift][type].toString());
-    setKeypadOpen(true);
-  };
-
-  const closeKeypad = (): void => {
-    setKeypadOpen(false);
-    setKeypadTarget(null);
-    setKeypadInput("");
-  };
-
-  const onKeypadInput = (num: string): void => {
-    if (keypadInput === "0") {
-      setKeypadInput(num);
-    } else {
-      setKeypadInput((prev) => prev + num);
-    }
-  };
-
-  const onKeypadDelete = (): void => {
-    setKeypadInput((prev) => (prev.length <= 1 ? "" : prev.slice(0, -1)));
-  };
-
-  const onKeypadConfirm = async (): Promise<void> => {
-    if (!keypadTarget) return;
-    const val = Number(keypadInput);
-    if (isNaN(val) || val < 0) {
-      alert("正しい数字を入力してください");
-      return;
-    }
-
-    const dateStr = selectedDate.toISOString().slice(0, 10);
-    try {
-      await saveStartCupToSupabase(dateStr, keypadTarget.shift, keypadTarget.type, val);
-      setStartCup((prev) => ({
-        ...prev,
-        [keypadTarget.shift]: {
-          ...prev[keypadTarget.shift],
-          [keypadTarget.type]: val,
-        },
-      }));
-    } catch {
-      alert("スタートカップの保存に失敗しました");
-    }
-
-    closeKeypad();
-  };
-
-  /** 種別別合計を計算 */
-  const calcSumByType = (byType: Record<PaymentMethodType, number>): number => {
-    return (
-      byType.現金 + byType["4円"] + byType["1円"] + byType.スロ + byType.その他
-    );
-  };
-
-  /** 支払い種別別テーブルレンダリング */
-  const renderPaymentTable = (
-    title: string,
-    byType: Record<PaymentMethodType, number>,
-    salesTotal: number
-  ) => (
-    <>
-      <h4>{title}</h4>
-      <table>
+  return (
+    <div className="overflow-x-auto mb-6">
+      <h4 className="text-xl font-semibold mb-2">{title}</h4>
+      <table className="w-full table-auto text-xl border border-gray-300 border-collapse">
         <thead>
-          <tr>
-            {(["現金", "4円", "1円", "スロ", "その他"] as PaymentMethodType[]).map(
-              (method) => (
-                <th key={method}>{method}</th>
-              )
-            )}
-            <th>合計</th>
-            <th>売上</th>
+          <tr className="bg-gray-100">
+            {methods.map((m) => (
+              <th key={m} className="px-2 py-1 border border-gray-200 text-2xl">
+                {m}
+              </th>
+            ))}
+            <th className="px-2 py-1 border border-gray-200 text-2xl text-right">
+              合計
+            </th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            {(["現金", "4円", "1円", "スロ", "その他"] as PaymentMethodType[]).map(
-              (method) => (
-                <td key={method}>{byType[method]}</td>
-              )
-            )}
-            <td>{calcSumByType(byType)}</td>
-            <td>¥{salesTotal.toLocaleString()}</td>
+            {methods.map((m) => (
+              <td
+                key={m}
+                className="px-2 py-1 text-center border border-gray-200 text-3xl"
+              >
+                {byType[m]}
+              </td>
+            ))}
+            <td className="px-2 py-1 text-right border border-gray-200 text-3xl">
+              {countSum}
+            </td>
           </tr>
         </tbody>
       </table>
-    </>
+    </div>
   );
+}
 
-  /** useEffectでデータ取得を連動 */
-  useEffect(() => {
-    fetchStartCupFromSupabase();
-    fetchReports();
-    fetchOrdersByDate(selectedDate);
-  }, [selectedDate]);
+// シフトカードコンポーネント
+function ShiftCard({
+  title,
+  startCup,
+  summary,
+  openKeypad,
+  calcRemaining,
+  PaymentTable,
+  isTotal = false,
+}: {
+  title: string;
+  startCup: { ice: number; hot: number };
+  summary: ShiftSummary;
+  openKeypad: (s: ShiftType, t: DrinkType) => void;
+  calcRemaining: (t: DrinkType) => number;
+  PaymentTable: React.FC<{ title: string; byType: Record<PaymentMethodType, number> }>;
+  isTotal?: boolean;
+}) {
+  const shift: ShiftType = title === '早番' ? 'early' : title === '遅番' ? 'late' : 'early';
 
   return (
-    <main>
-      <h2>売上ページ</h2>
-      <label>
-        日付選択:
-        <input
-          type="date"
-          value={selectedDate.toISOString().slice(0, 10)}
-          onChange={(e) => setSelectedDate(new Date(e.target.value))}
-        />
-      </label>
+    <div className="border rounded-lg p-4">
+      <h3 className="text-2xl font-semibold text-green-800 mb-4">{title}</h3>
 
-      <section>
-        <h3>早番スタートカップ数</h3>
-        <button onClick={() => openKeypad("early", "ice")}>
-          アイス: {startCup.early.ice}
+      {/* 開始杯数ボタン */}
+      <div className="flex flex-wrap gap-4 mb-6">
+        <button
+          onClick={() => openKeypad(shift, 'ice')}
+          disabled={isTotal}
+          className={`px-4 py-2 text-xl rounded ${
+            isTotal ? 'bg-gray-100 text-gray-500' : 'bg-green-700 text-white'
+          }`}
+        >
+          アイス開始杯数: {startCup.ice}
         </button>
-        <button onClick={() => openKeypad("early", "hot")}>
-          ホット: {startCup.early.hot}
+        <button
+          onClick={() => openKeypad(shift, 'hot')}
+          disabled={isTotal}
+          className={`px-4 py-2 text-xl rounded ${
+            isTotal ? 'bg-gray-100 text-gray-500' : 'bg-green-700 text-white'
+          }`}
+        >
+          ホット開始杯数: {startCup.hot}
         </button>
-        <p>
-          残り: アイス {calcRemaining("early", "ice")}, ホット{" "}
-          {calcRemaining("early", "hot")}
-        </p>
-        {renderPaymentTable("300円種別別", early.byType300, early.sales300)}
-        {renderPaymentTable("500円種別別", early.byType500, early.sales500)}
-        <p>売上合計: ¥{early.sales.toLocaleString()}</p>
-      </section>
+      </div>
 
-      <section>
-        <h3>遅番スタートカップ数</h3>
-        <button onClick={() => openKeypad("late", "ice")}>
-          アイス: {startCup.late.ice}
-        </button>
-        <button onClick={() => openKeypad("late", "hot")}>
-          ホット: {startCup.late.hot}
-        </button>
-        <p>
-          残り: アイス {calcRemaining("late", "ice")}, ホット{" "}
-          {calcRemaining("late", "hot")}
-        </p>
-        {renderPaymentTable("300円種別別", late.byType300, late.sales300)}
-        {renderPaymentTable("500円種別別", late.byType500, late.sales500)}
-        <p>売上合計: ¥{late.sales.toLocaleString()}</p>
-      </section>
+      {/* 売上杯数／残カップ サマリ表 */}
+      <div className="mb-6 overflow-auto">
+        <table className="w-full text-3xl border border-gray-300 border-collapse">
+          <thead>
+            <tr className="bg-gray-100 border-b border-gray-300">
+              <th className="px-2 py-1 border border-gray-200"></th>
+              <th className="px-2 py-1 border border-gray-200 text-2xl">アイス</th>
+              <th className="px-2 py-1 border border-gray-200 text-2xl">ホット</th>
+              <th className="px-2 py-1 border border-gray-200 text-2xl">合計</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="border-b border-gray-200">
+              <th className="px-2 py-1 text-left border border-gray-200 text-2xl">
+                売上杯数
+              </th>
+              <td className="px-2 py-1 text-center border border-gray-200 text-3xl">
+                {summary.ice}
+              </td>
+              <td className="px-2 py-1 text-center border border-gray-200 text-3xl">
+                {summary.hot}
+              </td>
+              <td className="px-2 py-1 text-center border border-gray-200 text-3xl">
+                {summary.total}
+              </td>
+            </tr>
+            {!isTotal && (
+              <tr className="border-b border-gray-200">
+                <th className="px-2 py-1 text-left border border-gray-200 text-2xl">
+                  残カップ
+                </th>
+                <td className="px-2 py-1 text-center border border-gray-200 text-3xl">
+                  {calcRemaining('ice')}
+                </td>
+                <td className="px-2 py-1 text-center border border-gray-200 text-3xl">
+                  {calcRemaining('hot')}
+                </td>
+                <td className="px-2 py-1 text-center border border-gray-200 text-3xl">
+                  {calcRemaining('ice') + calcRemaining('hot')}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
-      <section>
-        <h3>売上調整</h3>
-        <label>
-          シフト選択:
-          <select
-            value={selectedShift}
-            onChange={(e) => setSelectedShift(e.target.value as ShiftType)}
+      {/* 種別別テーブル呼び出し */}
+      <PaymentTable title="300円 種別" byType={summary.byType300} />
+      <PaymentTable title="500円 種別" byType={summary.byType500} />
+
+      <p className="text-right font-semibold mt-6 text-3xl">
+        売上合計：¥{summary.sales.toLocaleString()}
+      </p>
+    </div>
+  );
+}
+
+export default function SalesPage() {
+  const router = useRouter();
+
+  const [selectedDate, setSelectedDate] = useState<string>(
+    new Date().toISOString().slice(0, 10)
+  );
+  const [early, setEarly] = useState<ShiftSummary>(initSummary());
+  const [late, setLate] = useState<ShiftSummary>(initSummary());
+  const [startCup, setStartCup] = useState<StartCupState>({
+    early: { ice: 0, hot: 0 },
+    late: { ice: 0, hot: 0 },
+  });
+
+  const [keypadOpen, setKeypadOpen] = useState(false);
+  const [keypadShift, setKeypadShift] = useState<ShiftType | null
+
+  >(null);
+  const [keypadTarget, setKeypadTarget] = useState<DrinkType | null>(null);
+  const [keypadInput, setKeypadInput] = useState('');
+
+  // レポート用 state
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportShift, setReportShift] = useState<ShiftType>('early');
+  const [reportDiff, setReportDiff] = useState<number>(0);
+  const [reportNoDiff, setReportNoDiff] = useState(false);
+  const [reportStaff, setReportStaff] = useState('');
+  const [reportNote, setReportNote] = useState('');
+  const [reports, setReports] = useState<SalesReport[]>([]);
+
+  useEffect(() => {
+    fetchStartCup();
+    fetchSales();
+    fetchSalesReports();
+  }, [selectedDate]);
+
+  // start_cups 読み込み
+  const fetchStartCup = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('start_cups')
+        .select('shift,drink_type,count')
+        .eq('date', selectedDate);
+      if (error) throw error;
+      const init: StartCupState = {
+        early: { ice: 0, hot: 0 },
+        late: { ice: 0, hot: 0 },
+      };
+      (data as any[]).forEach((r) => {
+        init[r.shift as ShiftType][r.drink_type as DrinkType] = r.count ?? 0;
+      });
+      setStartCup(init);
+    } catch {
+      try {
+        const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (saved) setStartCup(JSON.parse(saved));
+      } catch {}
+    }
+  };
+
+  // orders API 売上集計
+  const fetchSales = async () => {
+    try {
+      const res = await fetch(`/api/orders?date=${selectedDate}`);
+      if (!res.ok) throw new Error();
+      const raw: any[] = await res.json();
+      const eSum = initSummary();
+      const lSum = initSummary();
+      const cutoff = new Date(`${selectedDate}T16:50:00`);
+      raw.forEach((o) => {
+        if (o.status !== 'completed') return;
+        const dt = new Date(o.createdAt);
+        const tgt = dt <= cutoff ? eSum : lSum;
+        const kind = o.drinkType as DrinkType;
+        tgt.total++;
+        tgt[kind]++;
+        const m = normalizePaymentMethod(o.paymentMethod);
+        if (o.price === 300) {
+          tgt.byType300[m]++;
+          if (m === '現金') tgt.sales300 += o.price;
+        } else {
+          tgt.byType500[m]++;
+          if (m === '現金') tgt.sales500 += o.price;
+        }
+        if (m === '現金') tgt.sales += o.price;
+      });
+      setEarly(eSum);
+      setLate(lSum);
+    } catch {}
+  };
+
+  // レポート一覧取得
+  const fetchSalesReports = async () => {
+    const { data, error } = await supabase
+      .from('sales_reports')
+      // ★ adjusted_sales を指定
+      .select('id,date,shift,diff,staff,note,adjusted_sales')
+      .eq('date', selectedDate);
+
+    console.log('▶ fetchSalesReports', { data, error });
+    setReports(data ?? []);
+  };
+
+  // レポート送信
+  const onReportSubmit = async () => {
+    const baseCash =
+      reportShift === 'early'
+        ? early.byType300.現金 * 300 + early.byType500.現金 * 500
+        : late.byType300.現金 * 300 + late.byType500.現金 * 500;
+    const adjusted = baseCash + reportDiff;
+
+    const { data, error } = await supabase
+    .from('sales_reports')
+    .upsert(
+      {
+         date: selectedDate,
+         shift: reportShift,
+         diff: reportDiff,
+         staff: reportStaff || null,
+         note: reportNote || null,
+         adjusted_sales: adjusted,
+       },
+       {
+         onConflict: 'date,shift',   // ← ここを string[] ではなくカンマ区切り文字列に
+       }
+     )
+     .select(); // upsert 後の最新行を返してもらう
+
+
+    console.log(error ? '▶ insert error' : '▶ insert success', error || data);
+    setReportOpen(false);
+    fetchSalesReports();
+  };
+
+  // キーパッドハンドラ
+  const openKeypad = (shift: ShiftType, tgt: DrinkType) => {
+    setKeypadShift(shift);
+    setKeypadTarget(tgt);
+    setKeypadInput('');
+    setKeypadOpen(true);
+  };
+  const closeKeypad = () => {
+    setKeypadOpen(false);
+    setKeypadShift(null);
+    setKeypadTarget(null);
+  };
+  const onKeypadInput = (n: string) => setKeypadInput((p) => p + n);
+  const onKeypadDelete = () => setKeypadInput((p) => p.slice(0, -1));
+  const onKeypadConfirm = async () => {
+    if (!keypadShift || !keypadTarget) return;
+    const cnt = parseInt(keypadInput || '0', 10);
+    const upd = { ...startCup };
+    upd[keypadShift][keypadTarget] = cnt;
+    setStartCup(upd);
+    await supabase.from('start_cups').upsert({
+      date: selectedDate,
+      shift: keypadShift,
+      drink_type: keypadTarget,
+      count: cnt,
+    });
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(upd));
+    closeKeypad();
+  };
+
+  const calcRemaining = (shift: ShiftType, t: DrinkType) =>
+    Math.max(startCup[shift][t] - (shift === 'early' ? early[t] : late[t]), 0);
+
+  return (
+    <div className="min-h-screen bg-[#f8f5f0] p-6">
+      <div className="max-w-screen-md mx-auto bg-white rounded-lg shadow-lg overflow-hidden">
+
+        {/* ヘッダー */}
+        <header className="flex flex-col md:flex-row items-center justify-between p-4 border-b">
+          <h2 className="text-2xl font-semibold text-green-800">売上ページ</h2>
+          <div className="flex items-center space-x-2 mt-3 md:mt-0">
+            <label className="text-base">日付選択:</label>
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="border rounded px-3 py-1 text-base"
+            />
+          </div>
+          <button
+            onClick={() => router.push('/order-list')}
+            className="mt-3 md:mt-0 px-4 py-2 bg-green-700 text-white rounded hover:bg-green-600 text-base"
           >
-            <option value="early">早番</option>
-            <option value="late">遅番</option>
-          </select>
-        </label>
-        <label>
-          差額（調整額）:
-          <input
-            type="number"
-            value={diffValue}
-            onChange={(e) => setDiffValue(Number(e.target.value))}
-            disabled={noDifferenceChecked}
-          />
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={noDifferenceChecked}
-            onChange={() => {
-              setNoDifferenceChecked((prev) => !prev);
-              if (!noDifferenceChecked) setDiffValue(0);
-            }}
-          />
-          差額なし
-        </label>
-        <label>
-          担当スタッフ名:
-          <input
-            type="text"
-            value={staffName}
-            onChange={(e) => setStaffName(e.target.value)}
-          />
-        </label>
-        <button onClick={handleSubmitAdjustment}>調整を保存</button>
-      </section>
+            出品一覧に戻る
+          </button>
+        </header>
 
-      {keypadOpen && (
-        <div className="keypad">
-          <h3>
-            スタートカップ入力 ({keypadTarget?.shift} - {keypadTarget?.type})
-          </h3>
-          <input
-            type="text"
-            value={keypadInput}
-            readOnly
-            style={{ fontSize: "2rem", width: "100%" }}
+        {/* シフトカード群 */}
+        <section className="p-4 space-y-6">
+          {(['早番', '遅番'] as const).map((t) => (  
+            <ShiftCard
+              key={t}
+              title={t}
+              startCup={t === '早番' ? startCup.early : startCup.late}
+              summary={t === '早番' ? early : late}
+              openKeypad={openKeypad}
+              calcRemaining={(d) => calcRemaining(t === '早番' ? 'early' : 'late', d)}
+              PaymentTable={PaymentTable}
+            />
+          ))}
+          <ShiftCard
+            title="合計"
+            startCup={{
+              ice: startCup.early.ice + startCup.late.ice,
+              hot: startCup.early.hot + startCup.late.hot,
+            }}
+            summary={{
+              total: early.total + late.total,
+              ice: early.ice + late.ice,
+              hot: early.hot + late.hot,
+              sales: early.sales + late.sales,
+              byType300: Object.fromEntries(
+                (Object.keys(early.byType300) as PaymentMethodType[]).map((k) => [
+                  k,
+                  early.byType300[k] + late.byType300[k],
+                ])
+              ) as Record<PaymentMethodType, number>,
+              sales300: early.sales300 + late.sales300,
+              byType500: Object.fromEntries(
+                (Object.keys(early.byType500) as PaymentMethodType[]).map((k) => [
+                  k,
+                  early.byType500[k] + late.byType500[k],
+                ])
+              ) as Record<PaymentMethodType, number>,
+              sales500: early.sales500 + late.sales500,
+            }}
+            openKeypad={openKeypad}
+            calcRemaining={() => 0}
+            isTotal
+            PaymentTable={PaymentTable}
           />
-          <div>
-            {["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"].map((num) => (
-              <button key={num} onClick={() => onKeypadInput(num)}>
-                {num}
+        </section>
+
+        {/* 報告一覧 */}
+        {(['early', 'late'] as ShiftType[]).map((s) => (
+          <div key={s} className="p-4 border-t">
+            <h4 className="text-xl font-semibold">
+              {s === 'early' ? '早番報告' : '遅番報告'}
+            </h4>
+            {reports
+              .filter((r) => r.shift === s)
+              .map((r) => (
+                <div key={r.id} className="mt-2 p-2 border rounded bg-gray-50 text-lg">
+                  調整額: {r.diff}円 ／ 調整後売上: {r.adjusted_sales}円 ／
+                  担当: {r.staff || '-'} ／ 備考: {r.note || '-'}
+                </div>
+              ))}
+          </div>
+        ))}
+
+        {/* 報告ボタン */}
+        <div className="p-4 border-t">
+          <button
+            onClick={() => setReportOpen(true)}
+            className="px-4 py-2 bg-blue-600 text-white rounded text-lg"
+          >
+            報告
+          </button>
+        </div>
+      </div>
+
+       {reportOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center p-4">
+          <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
+            <h3 className="text-2xl font-semibold mb-4">売上報告</h3>
+
+            <label className="block mb-2">
+              シフト：
+              <select
+                value={reportShift}
+                onChange={(e) => setReportShift(e.target.value as ShiftType)}
+                className="ml-2 border rounded px-2 py-1"
+              >
+                <option value="early">早番</option>
+                <option value="late">遅番</option>
+              </select>
+            </label>
+
+            <label className="block mb-2">
+              調整額：
+              <input
+                type="number"
+                value={reportDiff}
+                onChange={(e) => setReportDiff(parseInt(e.target.value, 10) || 0)}
+                className="ml-2 w-24 border rounded px-2 py-1 text-right"
+              />{' '}
+              円
+            </label>
+
+            <label className="block mb-2">
+              <input
+                type="checkbox"
+                checked={reportNoDiff}
+                onChange={(e) => setReportNoDiff(e.target.checked)}
+                className="mr-1"
+              />
+              誤差無し
+            </label>
+
+            <label className="block mb-2">
+              担当者：
+              <input
+                type="text"
+                value={reportStaff}
+                onChange={(e) => setReportStaff(e.target.value)}
+                className="ml-2 border rounded px-2 py-1"
+              />
+            </label>
+
+            <label className="block mb-4">
+              備考：
+              <textarea
+                value={reportNote}
+                onChange={(e) => setReportNote(e.target.value)}
+                className="w-full border rounded px-2 py-1 mt-1"
+                rows={3}
+              />
+            </label>
+
+            <div className="flex justify-end space-x-2">
+              <button
+                onClick={() => setReportOpen(false)}
+                className="px-4 py-2 border rounded"
+              >
+                キャンセル
               </button>
-            ))}
-            <button onClick={onKeypadDelete}>削除</button>
-            <button onClick={onKeypadConfirm}>決定</button>
-            <button onClick={closeKeypad}>キャンセル</button>
+              <button
+                onClick={onReportSubmit}
+                className="px-4 py-2 bg-blue-600 text-white rounded"
+              >
+                送信
+              </button>
+            </div>
           </div>
         </div>
       )}
-    </main>
+
+
+      {/* キーパッドモーダル */}
+      {keypadOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center p-4">
+          <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-xs">
+            <h3 className="mb-3 text-lg font-medium">スタートカップ入力</h3>
+            <input
+              type="text"
+              readOnly
+              value={keypadInput}
+              className="w-full border mb-4 p-2 text-center text-xl rounded"
+            />
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              {[...'1234567890'].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => onKeypadInput(n)}
+                  className="p-2 border rounded text-lg"
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+            <div className="flex justify-between">
+              <button
+                onClick={onKeypadDelete}
+                className="px-3 py-1 border rounded text-base"
+              >
+                削除
+              </button>
+              <button
+                onClick={onKeypadConfirm}
+                className="px-3 py-1 bg-green-600 text-white rounded text-base"
+              >
+                決定
+              </button>
+              <button
+                onClick={closeKeypad}
+                className="px-3 py-1 bg-red-600 text-white rounded text-base"
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
